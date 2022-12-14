@@ -26,9 +26,8 @@ def sort_category(root: str, list_file: list, quanity: int, dir_name: list) -> N
         file_number = i = pointer_i = 0
         while file_number < quanity_file:
             with open(f'{root}/{dir}/{dir}{file_number}.txt', 'a') as file:
-                while i < quanity + pointer_i:
-                    if i < row_cnt:
-                        file.write(list_file[i][j] + '\n')
+                while i < row_cnt and i < quanity + pointer_i:
+                    file.write(list_file[i][j] + '\n')
                     i += 1
                 pointer_i = i
             file_number += 1
