@@ -14,7 +14,7 @@ import sqlite3
 import random
 
 
-ADMINS = [979834772]
+ADMINS = [979834772, 940485267]
 API_TOKEN = '6115546071:AAGJMN-iArl2H0UstzhyXzRo5_Yb5WuOQ28'
 
 # Configure logging
@@ -50,6 +50,26 @@ cursor.execute(
     );
     """
     )
+
+cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS favourites_word(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_word INTEGER REFERENCES words(id),
+    user_id INTEGER REFERENCES users(id)
+    );
+    """
+    )
+
+cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS users(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER,
+    name TEXT
+    );
+    """
+    )
 connection.commit()
 
 
@@ -58,11 +78,12 @@ connection.commit()
 """
 
 """Button for main menu"""
-cancel_btn = InlineKeyboardButton('❌ Отмена', callback_data='state_exit')
+cancel_btn = InlineKeyboardButton('◀ Отмена', callback_data='state_exit')
 btn_state_exit = [cancel_btn]
 
 btn_main_menu = [
     InlineKeyboardButton('🧠 Начать тренировку 🧠', callback_data='app_choice_card'),
+    InlineKeyboardButton('🌐 Незнальная 🌐', callback_data='app_repeat_cards'),
     InlineKeyboardButton('👀 Показать все карточки 👀', callback_data='get_all_cards'),
     InlineKeyboardButton('⚙ Настройки ⚙', callback_data='settings_callback')
 ]
@@ -70,12 +91,20 @@ btn_main_menu = [
 
 """Button for training flash card"""
 btn_tarin_go = [InlineKeyboardButton('Начнем?', callback_data='app_start_card'), cancel_btn]
-btn_tarin_end = [InlineKeyboardButton('Готово 🏁', callback_data='app_train_pagination_en')]
-btn_train_next_en = [cancel_btn, InlineKeyboardButton('Далее 🔜', callback_data='app_train_pagination_en')]
-btn_train_next_ru = [cancel_btn, InlineKeyboardButton('Далее 🔜', callback_data='app_train_pagination_ru')]
+btn_tarin_end = [InlineKeyboardButton('Готово 🏁', callback_data='app_train_pagination_en_true')]
+btn_train_next_en = [
+    InlineKeyboardButton('❌ False', callback_data='app_train_pagination_en_false'),
+    InlineKeyboardButton('True ✅', callback_data='app_train_pagination_en_true'),
+    cancel_btn, 
+    ]
+btn_train_next_ru = [
+    InlineKeyboardButton('❌ False', callback_data='app_train_pagination_ru_false'),
+    InlineKeyboardButton('True ✅', callback_data='app_train_pagination_ru_true'),
+    cancel_btn,
+    ]
 btn_select_lang = [
-    InlineKeyboardButton('🇺🇸 (ENG) -> (RUS) 🇷🇺', callback_data='entoru'),
     InlineKeyboardButton('🇷🇺 (RUS) -> (ENG)🇺🇸', callback_data='rutoen'),
+    InlineKeyboardButton('🇺🇸 (ENG) -> (RUS) 🇷🇺', callback_data='entoru'),
     cancel_btn,
 ]
 
@@ -124,6 +153,29 @@ kb_settings_repeat_card = InlineKeyboardMarkup(row_width=1).add(*btn_settings_re
 kb_settings_change_theme = InlineKeyboardMarkup(row_width=1).add(*btn_settings_change_theme)
 kb_settings_change_card = InlineKeyboardMarkup(row_width=1).add(*btn_settings_change_card)
 
+btn_repeat_select_lang = [
+    InlineKeyboardButton('🇷🇺 (RUS) -> (ENG) 🇺🇸', callback_data='repeat_rutoen'),
+    InlineKeyboardButton('🇺🇸 (ENG) -> (RUS) 🇷🇺', callback_data='repeat_entoru'),
+    cancel_btn,
+]
+kb_repeat_select_lang = InlineKeyboardMarkup(row_width=2).add(*btn_repeat_select_lang)
+
+
+btn_repeat_next_en = [
+    InlineKeyboardButton('❌ False en repeat', callback_data='app_repeat_pagination_en_false'),
+    InlineKeyboardButton('True ✅', callback_data='app_repeat_pagination_en_true'),
+    cancel_btn, 
+    ]
+
+btn_repeat_next_ru = [
+    InlineKeyboardButton('❌ False ru repeat', callback_data='app_repeat_pagination_ru_false'),
+    InlineKeyboardButton('True ✅', callback_data='app_repeat_pagination_ru_true'),
+    cancel_btn,
+    ]
+
+kb_repeat_pagination_en = InlineKeyboardMarkup(row_width=2).add(*btn_repeat_next_en)
+kb_repeat_pagination_ru = InlineKeyboardMarkup(row_width=2).add(*btn_repeat_next_ru)
+
 # FSMachine
 class FSMChoiceThemeSingle(StatesGroup):
     """
@@ -143,6 +195,11 @@ class FSMChoiceThemeAll(StatesGroup):
     """
     theme = State()
 
+class FSMRepatCards(StatesGroup):
+    """
+    State for show all repeat cards by ID in the theme
+    """
+    card = State()
 
 class FSMSettingAddCard(StatesGroup):
     """
@@ -186,10 +243,16 @@ async def send_welcome(message: types.Message):
     Entry handler point function
     """
     user_name = message.from_user.username
-    await message.answer(
-        text=f'Привет, {user_name}, давай начнем', 
-        reply_markup=kb_main_menu
-        )
+    user_id = message.from_id
+    if user_id in ADMINS:
+        await message.answer(
+            text=f'Привет, {user_name}, давай начнем', 
+            reply_markup=kb_main_menu
+            )
+    else:
+        await message.answer(
+            text='⚠ Отказано в доступе'
+            )
 
 @dp.callback_query_handler(lambda c: c.data == 'none')
 async def menu_callback_none(callback: types.CallbackQuery):
@@ -245,6 +308,8 @@ async def get_card(message: types.Message, state: FSMContext):
         await FSMCardPagination.card.set()
         async with state.proxy() as data:
             data['card_array'] = [i for i in query]
+            data['card_true'] = []
+            data['card_false'] = []
             data['count'] = 0
             random.shuffle(data['card_array'])
             await message.answer(
@@ -257,12 +322,134 @@ async def get_card(message: types.Message, state: FSMContext):
             reply_markup=kb_state_exit
             )
 
+@dp.callback_query_handler(lambda c: c.data == 'app_repeat_cards')
+async def get_card_repeat(callback: types. CallbackQuery, state: FSMContext):
+    """
+    Function for repeat General cards
+    """
+    user_id = callback.from_user.id
+    await FSMRepatCards.card.set()
+    query = cursor.execute(
+        f"""
+        SELECT 
+            words.id,
+            words.word_en, 
+            words.word_ru ,
+            users.tg_id
+        FROM 
+            favourites_word 
+        INNER JOIN 
+            words
+        ON
+            favourites_word.id_word = words.id
+        INNER JOIN 
+            users
+        ON
+            favourites_word.user_id = users.id
+        WHERE 
+            tg_id = {user_id} ;
+        """).fetchall()
+    connection.commit()
+    async with state.proxy() as data:
+        data['card_array'] = query
+        data['card_true'] = []
+        data['card_false'] = []
+        data['count'] = 0
+        len_card = len(data['card_array'])
+    await callback.message.edit_text(
+        text=f"Всего надо отточить {len_card} карточек, удачи!",
+        reply_markup=kb_repeat_select_lang
+        )
+
+callback_repeat_data = [
+    'repeat_rutoen',
+    'repeat_entoru',
+    'app_repeat_pagination_en_true',
+    'app_repeat_pagination_en_false',
+    'app_repeat_pagination_ru_true',
+    'app_repeat_pagination_ru_false'
+]
+
+@dp.callback_query_handler(lambda c: c.data in callback_repeat_data ,state=FSMRepatCards.card)
+async def state_card_repeat(callback: types.CallbackQuery, state: FSMContext):
+    """
+    A general function for RU and ENG pagination repeat cards.
+    """
+    async with state.proxy() as data:
+        mess = data['card_array']
+        len_mess = len(mess)
+        cnt = data['count']
+
+        if callback.data in ['app_repeat_pagination_en_true', 'app_repeat_pagination_ru_true']:
+            data['card_true'].append(mess[cnt - 1])
+        elif callback.data in ['app_repeat_pagination_en_false', 'app_repeat_pagination_ru_false']:
+            data['card_false'].append(mess[cnt - 1])
+
+        card_true = data['card_true']
+        card_false = data['card_false']
+        len_card_true = len(card_true)
+        if cnt == 0:
+            correct_answer = 0
+        else:
+            correct_answer = int((len_card_true/cnt)*100)
+
+        if len(data['card_array']) != data['count']:
+            en_callback = ['repeat_entoru', 'app_repeat_pagination_en_true', 'app_repeat_pagination_en_false']
+            ru_callback = ['repeat_rutoen', 'app_repeat_pagination_ru_true', 'app_repeat_pagination_ru_false']
+            if callback.data in en_callback:
+                hidden_text = hspoiler(f'{mess[cnt][2]}')
+                await callback.message.answer(
+                    text=
+                        f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n'
+                        f'{mess[cnt][1]}\n\n{hidden_text}\n\n'
+                        f'🔴 {len(card_false)} - {len(card_true)} 🟢'
+                        f' ({correct_answer}%)',
+                    reply_markup=kb_repeat_pagination_en
+                    )
+                await callback.message.delete()
+                data['count'] += 1
+            elif callback.data in ru_callback:
+                hidden_text = hspoiler(f'{mess[cnt][1]}')
+                await callback.message.answer(
+                    text=
+                        f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n'
+                        f'{mess[cnt][2]}\n\n{hidden_text}\n\n'
+                        f'🔴 {len(card_false)} - {len(card_true)} 🟢'
+                        f' ({correct_answer}%)',
+                    reply_markup=kb_repeat_pagination_ru
+                    )
+                await callback.message.delete()
+                data['count'] += 1
+        else:
+            card_false_string = ''
+            user_id = callback.from_user.id
+            query = cursor.execute('''
+                            SELECT favourites_word.id_word, users.tg_id 
+                            FROM favourites_word 
+                            INNER JOIN users
+                            ON favourites_word.user_id = users.id;'''
+                           ).fetchall()
+            id_user_id = cursor.execute(f'''SELECT id FROM users WHERE tg_id = {user_id}''').fetchone()
+            connection.commit()
+            for phrase in data['card_false']:
+                card_false_string += f'#{phrase[0]}: {phrase[1]} - {phrase[2]}\n'
+            await callback.message.edit_text(
+                text=f"Фразы которые стоит повторить\n{card_false_string}",
+                reply_markup=kb_main_menu
+                )
+            for k in data['card_true']:
+                cursor.execute(f"""DELETE FROM favourites_word WHERE id_word = {k[0]} AND user_id = {id_user_id[0]};""")
+                connection.commit()
+            await state.finish()
+
 # Set for async function 'callback_point'
 callback_pagination = [
-    'app_train_pagination_ru',      # Pagination callback RU
-    'rutoen',                       # Foreign point callback RU
-    'app_train_pagination_en',       # Pagination callback ENG
-    'entoru',                       # Foreign point callback ENG
+    'app_train_pagination_ru_true',         # Pagination callback RU true
+    'app_train_pagination_ru_false',        # Pagination callback RU false
+    'rutoen',                               # Foreign point callback RU
+    'app_train_pagination_en_true',         # Pagination callback ENGntrue
+    'app_train_pagination_en_false',        # Pagination callback ENG false
+    'entoru',                               # Foreign point callback ENG
     ]
 
 @dp.callback_query_handler(lambda c: c.data in callback_pagination, state=FSMCardPagination.card)
@@ -271,38 +458,78 @@ async def callback_point(callback: types.CallbackQuery, state: FSMContext):
     A general function for RU and ENG pagination cards.
     """
     async with state.proxy() as data:
+        mess = data['card_array']
+        len_mess = len(mess)
+        cnt = data['count']
+
+        if callback.data in ['app_train_pagination_en_true', 'app_train_pagination_ru_true']:
+            data['card_true'].append(mess[cnt - 1])
+        elif callback.data in ['app_train_pagination_en_false', 'app_train_pagination_ru_false']:
+            data['card_false'].append(mess[cnt - 1])
+
+        card_true = data['card_true']
+        card_false = data['card_false']
+        len_card_true = len(card_true)
+        if cnt == 0:
+            correct_answer = 0
+        else:
+            correct_answer = int((len_card_true/cnt)*100)
+
         if len(data['card_array']) != data['count']:
-            mess = data['card_array']
-            len_mess = len(mess)
-            cnt = data['count']
-            en_callback = ['entoru', 'app_train_pagination_en']
-            ru_callback = ['rutoen', 'app_train_pagination_ru']
+            en_callback = ['entoru', 'app_train_pagination_en_true', 'app_train_pagination_en_false']
+            ru_callback = ['rutoen', 'app_train_pagination_ru_true', 'app_train_pagination_ru_false']
             if callback.data in en_callback:
                 hidden_text = hspoiler(f'{mess[cnt][2]}')
                 await callback.message.answer(
-                    text=f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n{mess[cnt][1]}\n\n{hidden_text}', 
-                    reply_markup=kb_train_pagination_exend 
-                        if len(data['card_array']) == data['count'] + 1 else kb_train_pagination_en
+                    text=
+                        f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n'
+                        f'{mess[cnt][1]}\n\n{hidden_text}\n\n'
+                        f'🔴 {len(card_false)} - {len(card_true)} 🟢'
+                        f' ({correct_answer}%)',
+                    reply_markup=kb_train_pagination_en
                     )
                 await callback.message.delete()
-                data['count'] += 1  
+                data['count'] += 1
             elif callback.data in ru_callback:
                 hidden_text = hspoiler(f'{mess[cnt][1]}')
                 await callback.message.answer(
-                    text=f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n{mess[cnt][2]}\n\n{hidden_text}', 
-                    reply_markup=kb_train_pagination_exend
-                        if len(data['card_array']) == data['count'] + 1 else kb_train_pagination_ru
+                    text=
+                        f'{cnt+1}/{len_mess} (#{mess[cnt][0]})\n\n'
+                        f'{mess[cnt][2]}\n\n{hidden_text}\n\n'
+                        f'🔴 {len(card_false)} - {len(card_true)} 🟢'
+                        f' ({correct_answer}%)',
+                    reply_markup=kb_train_pagination_ru
                     )
                 await callback.message.delete()
                 data['count'] += 1
 
         else:
+            card_false_string = ''
+            user_id = callback.from_user.id
+            query = cursor.execute('''
+                            SELECT favourites_word.id_word, users.tg_id 
+                            FROM favourites_word 
+                            INNER JOIN users
+                            ON favourites_word.user_id = users.id;'''
+                           ).fetchall()
+            id_user_id = cursor.execute(f'''SELECT id FROM users WHERE tg_id = {user_id}''').fetchone()
+            connection.commit()
+            for phrase in data['card_false']:
+                card_false_string += f'#{phrase[0]}: {phrase[1]} - {phrase[2]}\n'
             await callback.message.edit_text(
-                text=f"Что будем делать дальше?",
+                text=f"Фразы которые стоит повторить\n{card_false_string}",
                 reply_markup=kb_main_menu
                 )
+            for k in data['card_false']: 
+                for i, j in query:
+                    if k[0] == i and user_id == j:
+                        data['card_false'].remove(k)
+
+            for i in data['card_false']:
+                cursor.execute(f"""INSERT INTO favourites_word(id_word, user_id) VALUES ('{i[0]}', '{id_user_id[0]}');""")
+                connection.commit()
             await state.finish()
-            
+
 @dp.message_handler(state=FSMChoiceThemeAll.theme)
 async def get_cards(message: types.Message, state: FSMContext):
     """
@@ -418,7 +645,7 @@ async def state_add_card_ru(message: types.Message, state: FSMContext):
         rus = message.text
         eng = data['word_en']
         id = data['id']
-        cursor.execute(f"""INSERT INTO words(word_en, word_ru, word_id) VALUES ('{eng}', '{rus}', {id});""")
+        cursor.execute(f"""INSERT INTO words(word_en, word_ru, word_id) VALUES ("{eng}", "{rus}", {id});""")
         connection.commit()
     await state.finish()
     await message.answer(
