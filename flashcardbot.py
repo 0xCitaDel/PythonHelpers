@@ -14,8 +14,8 @@ import sqlite3
 import random
 
 
-ADMINS = [979834772, 940485267]
-API_TOKEN = '6115546071:AAGJMN-iArl2H0UstzhyXzRo5_Yb5WuOQ28'
+ADMINS = []
+API_TOKEN = 'Your API Token here'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
